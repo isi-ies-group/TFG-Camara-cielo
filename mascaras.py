@@ -12,7 +12,7 @@ from matplotlib import pyplot as plt
 # In[13]:
 
 
-path_fotos_patron = 'C:/Users/nitra/Documents/GitHub/TFG_Camara/Fotos Cielo/patron/'
+path_fotos_patron = 'Fotos Cielo/Patron/'
 img_patron = cv2.imread(path_fotos_patron + 'imagen_patron.jpg', cv2.IMREAD_COLOR)
 
 
@@ -21,6 +21,7 @@ img_patron = cv2.imread(path_fotos_patron + 'imagen_patron.jpg', cv2.IMREAD_COLO
 
 # Máscara circular, para corregir los efectos de la lente
 def mascara_inicial():
+    global img_patron
     mask = img_patron.copy()
     X, Y, colores = mask.shape
     Y = mask.shape[1]
@@ -40,6 +41,7 @@ def mascara_inicial():
 
 # Máscara para determinar zone de cuielo visibe
 def mascara_cielo():
+    global img_patron
     img_proc = cv2.bitwise_and(img_patron, img_patron, mask=mascara_inicial())
     blue = cv2.inRange(img_proc[:,:,0], 0, 130)
     # blue = cv2.medianBlur(blue, 5)
