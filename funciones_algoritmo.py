@@ -476,8 +476,7 @@ def sol_cubierto(img_bgr, hora):
         return 0.0
     '''
     
-    zenith, azimuth = pos_solar(hora)
-    zenith += f_error_zenith()(azimuth)
+    zenith, azimuth = pos_solar(hora, imagen=True)
     zenith /= 90 
     
     # Circularidad alta
