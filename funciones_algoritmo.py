@@ -10,7 +10,11 @@ import numpy as np
 from sklearn import linear_model
 import pandas as pd
 from datetime import datetime as dt
+from datetime import timedelta
 import pvlib as pv
+from sklearn.preprocessing import PolynomialFeatures
+from sklearn.linear_model import LinearRegression
+from sklearn.pipeline import Pipeline
 import sys
 sys.path.append('../')
 
@@ -33,7 +37,8 @@ R = int(Y/2)
 # Rutas globales
 ruta_datos_areas = 'Datos/datos_areas.csv'
 ruta_datos_errores = 'Datos/datos_errores.csv'
-ruta_datos_regresion = 'Datos/info_regresion.csv'
+ruta_datos_regresion_nublado = 'Datos/info_regresion_nublado_completo.csv'
+ruta_datos_regresion_despejado = 'Datos/info_regresion_despejado_completo.csv'
 
 #%% FUNCIONES DEL ALGORITMO
 
@@ -85,33 +90,45 @@ def f_error_zenith():
         
         return f_e_zenith
 
-def f_rad_difusa():
-    global regr
+def f_rad_difusa_nublado():
+    global regr_nublado
     try:
-        return regr
+        return regr_nublado
     
     except:
         # Lectura del dataframe con las variables:
-        pd_info_regresion = pd.read_csv('Datos/info_regresion.csv')
+        pd_info_regresion_nublado = pd.read_csv(ruta_datos_regresion_nublado)
+       
+        grados = 2
+        regr_nublado = Pipeline([('poly', PolynomialFeatures(degree=grados)),
+                          ('linear', LinearRegression())])
+    
+        y_rad_nublado = pd_info_regresion_nublado['Radiacion difusa']
+        x_rad_nublado = pd_info_regresion_nublado[['ghi', 'Ratio nubes', 'Factor solar', 'Intensidad nubes ITUR Coseno:False Gamma_corr:True']]
+    
+        regr_nublado.fit(x_rad_nublado, y_rad_nublado)
+        return regr_nublado
         
-        regr = linear_model.LinearRegression()
+def f_rad_difusa_despejado():
+    global regr_despejado
+    try:
+        return regr_despejado
     
-        pd_info_regresion['Factor solar'] = 1 - pd_info_regresion['Factor solar']
-        for column in pd_info_regresion.columns:
-            if column in ['Intensidad cielo', 'Intensidad nubes', 'Factor solar']:
-                pd_info_regresion[column] *= pd_info_regresion['ghi']
-                
-        pd_info_regresion['Intensidad nubes'] *= pd_info_regresion['Ratio nubes']
-        pd_info_regresion['Intensidad cielo'] *= 1 - pd_info_regresion['Ratio nubes']
+    except:
+        # Lectura del dataframe con las variables:
+        pd_info_regresion_despejado = pd.read_csv(ruta_datos_regresion_despejado)
+        
+        grados = 2
+        regr_despejado = Pipeline([('poly', PolynomialFeatures(degree=grados)),
+                          ('linear', LinearRegression())])
+                          
+        y_rad_despejado = pd_info_regresion_despejado['Radiacion difusa']
+        x_rad_despejado = pd_info_regresion_despejado[['Radiacion', 'Intensidad cielo ITUR Coseno:True Gamma_corr:True']]
     
+        regr_despejado.fit(x_rad_despejado, y_rad_despejado)
+        return regr_despejado
     
-        y_rad = pd_info_regresion['Radiacion difusa']
-        x_rad = pd_info_regresion[['ghi', 'Ratio nubes', 'Factor solar', 'Intensidad cielo', 'Intensidad nubes']]
-    
-        regr.fit(x_rad, y_rad)
-        return regr
-    
-def rad_extra_atmosferica(hora):
+def rad_gh_teorica(hora):
     times = pd.DatetimeIndex([hora], tz='Europe/Madrid')
     pd_rad_teorica = Cam_Location.get_clearsky(times, model='haurwitz')
     ghi = pd_rad_teorica['ghi'].to_list()[0]
@@ -164,7 +181,8 @@ def hora_imagen(ruta_imagen):
 
     return hora
 
-def puntos_cardinales(img_bgr):
+def puntos_cardinales(img):
+    img_bgr = img.copy()
     # Lista con los azimuths de los puntos cardinales
     azimuths = [(lambda x: 90*x)(i) for i in range(4)]
     
@@ -207,6 +225,30 @@ def puntos_cardinales(img_bgr):
         cv2.putText(img_bgr, texto[azimuth], (pnt_x, pnt_y), fuente, escala, color[azimuth], thickness=20)
         
     return img_bgr
+    
+def dibujo_camino_sol(img_bgr, hora_img, delta_=timedelta(hours=2), color_=(0,255,0)):
+    # Se preoaran las variables auxiliares
+    img_bgr_copy = img_bgr.copy()
+    lista_horas = []
+    delta = timedelta(minutes=5)
+    dia_img = hora_img.date()
+    
+    # Se obtiene las horas de puesta y salida del sol en el día de la toma de la imágen
+    hora_salida_sol, hora_puesta_sol = salida_puesta_sol(dia_img)
+    hora = hora_salida_sol + delta_
+    
+    # Se obtiene una lista con las instantes en los que dibujar los centroides solares
+    while hora < hora_puesta_sol - delta_:
+        hora += delta
+        lista_horas.append(hora)
+    
+    # Se recorre la lista de horas, dibujando en la imñagen el centroide solar en ese instante
+    for hora in lista_horas:
+        centroide_img = centroide_solar(hora, imagen=True)
+        cv2.circle(img_bgr_copy, centroide_img, 2, color=color_, thickness=20)
+        
+        
+    return img_bgr_copy
 
 def pixel_zenith(punto):
     # Se obtiene el ángulo zenital en coordenadas de la imagen
@@ -243,12 +285,34 @@ def pixel_azimuth(punto):
     azimuth_real_imagen = 270 - alpha
     
     return azimuth_real_imagen
+    
+def matriz_posiciones():
+    # Devuelve una matriz, del tamaño de la imagen, con dos valores por cada elemento,
+    # siendo el primer valor el zenit y el segundo el azimut, valores correspondientes a la imagen, no se encuentran corregidos
+    global pixels_pos
+    
+    try:
+        return pixels_pos
+        
+    except:
+        pixel_pos = lambda pos: (pixel_zenith(pos), pixel_azimuth(pos))
+        pixels_pos = np.array([[pixel_pos([x,y]) for y in range(Y)] for x in range(X)])
+        
+        return pixels_pos
 
 def pixel_dist(punto, pnt_centro):
     delta = np.array(punto) - np.array(pnt_centro)
     dist = int(np.linalg.norm(delta))
 
     return dist
+    
+def matriz_distancias(punto):
+    # Devuelve una mattriz, del tamaño de la imagen, con la dstancia de cada pixel
+    # al punto especificado como parámetro
+
+    pixels_dist = np.array([[pixel_dist([y,x], punto) for y in range(Y)] for x in range(X)])
+    
+    return pixels_dist
 
 def mascara_nubes(img_bgr, centroide=None):
     '''
@@ -349,18 +413,10 @@ def porcion_nubes_cielo(mask_nubes):
     '''
     
     # Cálculo del área de la imagen que corresponde a cielo visible por la cámara
-    cnt_cielo, hierarchy = cv2.findContours(cielo, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-    area_cielo = 0
-    for cnt in cnt_cielo:
-        A = cv2.contourArea(cnt)
-        if A > area_cielo:
-            area_cielo = A
-    
+    area_cielo = cv2.countNonZero(cielo)
+
     # Cálculo del área del cielo cubierta por nubes
-    cnt_nubes, hierarchy = cv2.findContours(mask_nubes, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-    area_nubes = 0
-    for cnt in cnt_nubes:
-        area_nubes += cv2.contourArea(cnt)
+    area_nubes = cv2.countNonZero(mask_nubes)
     
     ratio_nubes = area_nubes / area_cielo
     return ratio_nubes
@@ -409,6 +465,45 @@ def centroide_solar(hora, imagen=False):
     centroide = (pnt_y, pnt_x)
 
     return centroide
+    
+def salida_puesta_sol(dia_img):
+    '''
+    Función encargada de obtener la hora de salida y puesta del sol
+    en el día indicado.
+
+    Returns
+    -------
+    salida_sol
+    puesta_sol
+    '''
+
+    
+    fechas = []
+    # Se obtiene la hora de la puesta y salida de sol del día de hoy
+    dia = dia_img.strftime('%Y-%m-%d %H:%M:%S')
+    fechas.append(dia)
+    time = pd.DatetimeIndex(fechas, tz='Europe/Madrid')
+    info = Cam_Location.get_sun_rise_set_transit(time)
+    
+    # En formato str...
+    sunrise = info['sunrise'].loc[fechas[0]].strftime('%Y-%m-%d %H:%M:%S')
+    sunset = info['sunset'].loc[fechas[0]].strftime('%Y-%m-%d %H:%M:%S')
+    
+    # Se obtiene la hora actual, y la puesta/salida del sol, en formato Datetime
+    salida_sol = dt.strptime(sunrise,'%Y-%m-%d %H:%M:%S')# +- timedelta(hours=1)
+    puesta_sol = dt.strptime(sunset,'%Y-%m-%d %H:%M:%S')# +- timedelta(hours=1)
+    
+    # Comprueba si la hora actual se encuentra entre la salida y la puesta del sol
+    return salida_sol, puesta_sol
+    
+def mascara_solar(img_bgr):
+    # Circumsolar Detection HLS
+    img_hls = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HLS)
+    L = img_hls[:,:,1]
+
+    mask_hls = cv2.inRange(L, 240, 255)
+
+    return mask_hls
 
 def sol_cubierto(img_bgr, hora):
     '''
@@ -537,33 +632,82 @@ def area_circumsolar(img_bgr):
                 A = temp
     return A
 
-def intensidad_media(img_bgr, mask=None):
-    # Se divide la imagen en los coolores
+def gamma_corr(img_bgr, gamma=2.2, maxVal=255):
+    gamma_corr = 1 / gamma
+    # Se normaliza la matriz con las imágenes
+    img_norm = img_bgr / maxVal
+    # Se obtiene la imagen en color corregida y desnormalizada
+    img_corr = np.power(img_norm, gamma_corr) * maxVal
+
+    return img_corr
+
+def intensidad_equiponderada(img_bgr):
+    # Cálculo de la luminancia del pixeles,
+    # como media de los canales B, G y R
+    
     B = img_bgr[:,:,0]
     G = img_bgr[:,:,1]
     R = img_bgr[:,:,2]
     
-    # Se crea la matriz con las intensidades de la imagen
     I = np.array(B/3 + G/3 + R/3, np.uint8)
+    return I
+
+    
+def intensidad_CCIR(img_bgr):
+    # Basado en el convenio CCIr 601 para el cáluclo de 
+    # luminancia en imágenes analógicas
+    
+    B = img_bgr[:,:,0]
+    G = img_bgr[:,:,1]
+    R = img_bgr[:,:,2]
+
+    I = np.array(B * 0.114 + G * 0.587 + R * 0.299, np.uint8)
+    return I 
+    
+def intensidad_ITUR(img_bgr):
+    # Basado en el convenio ITU-R BT 709 para el cáluclo de 
+    # luminancia en imágenes digitales
+    
+    B = img_bgr[:,:,0]
+    G = img_bgr[:,:,1]
+    R = img_bgr[:,:,2]
+
+    I = np.array(B * 0.0722 + G * 0.7152 + R * 0.2126, np.uint8)
+    return I 
+
+def intensidad_media(img_bgr, mask=None, modo='ITUR', coseno=False, gamma=False):
+    modos = {'No ponderado': intensidad_equiponderada,
+            'CCIR': intensidad_CCIR,
+            'ITUR': intensidad_ITUR}
+            
+    I = modos[modo](img_bgr)
+    
+    # Corrección gamma
+    if gamma:
+        I = gamma_corr(I, gamma)
+    
+    # Multiplicación de la matriz de luminancia por la matriz de los ángulos cenitales
+    if coseno:
+        zenits = matriz_posiciones()[:,:,0]
+        I = np.multiply(I, np.cos(np.deg2rad(zenits)))
     
     # Se obtiene el valor medio de la intensidad de la imagen
     media = cv2.mean(I, mask)[0]
     
     return media
 
-def rad_difusa(params):
-    regr_difusa = f_rad_difusa()
-    # Adecuacón de los parámetros:
-    ghi = params[0]
+def rad_difusa(radiacion, ratio_nubes, factor_solar, intens_media, cielo='despejado'):
+
+    f_rad_difusa = {'nublado': f_rad_difusa_nublado,
+                    'despejado': f_rad_difusa_despejado}
+                    
+    regr_difusa = f_rad_difusa[cielo]()
     
-    ratio_nubes = params[1]
-    
-    factor_solar = (1 - params[2]) * ghi
-    
-    intensidad_cielo = params[3] * ghi * (1 - ratio_nubes) / 255
-    
-    intensidad_nubes = params[4] * ghi * ratio_nubes / 255
-    
-    rad = regr_difusa.predict([[ghi, ratio_nubes, factor_solar, intensidad_cielo, intensidad_nubes]])[0]
+    if cielo == 'despejado':
+        intens_media *= (1 - ratio_nubes)
+        rad = regr_difusa.predict([[radiacion, intens_media]])[0]
+    else:
+        intens_media *= ratio_nubes
+        rad = regr_difusa.predict([[radiacion, ratio_nubes, factor_solar, intens_media]])[0]
     
     return rad
