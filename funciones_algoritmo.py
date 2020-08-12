@@ -639,7 +639,7 @@ def gamma_corr(img_bgr, gamma=2.2, maxVal=255):
     # Se obtiene la imagen en color corregida y desnormalizada
     img_corr = np.power(img_norm, gamma_corr) * maxVal
 
-    return img_corr
+    return np.array(img_corr, np.uint8)
 
 def intensidad_equiponderada(img_bgr):
     # Cálculo de la luminancia del pixeles,
