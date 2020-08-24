@@ -18,7 +18,7 @@ from sklearn.pipeline import Pipeline
 import sys
 sys.path.append('../')
 
-# Posición y clase de la cámara. PVLib
+# Posición y clase de la cámara. PVLib.
 Latitud = 40.453472
 Longitud = -3.727028
 Altitud = 650
