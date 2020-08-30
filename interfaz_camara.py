@@ -366,7 +366,7 @@ def f_rad_difusa_nublado_ghi():
         # Lectura del dataframe con las variables:
         pd_info_regresion_nublado = pd.read_csv(ruta_datos_regresion_nublado)
        
-        grados = 2
+        grados = 1
         regr_nublado_ghi = Pipeline([('poly', PolynomialFeatures(degree=grados)),
                           ('linear', LinearRegression())])
     
@@ -390,7 +390,7 @@ def f_rad_difusa_nublado():
         # Lectura del dataframe con las variables:
         pd_info_regresion_nublado = pd.read_csv(ruta_datos_regresion_nublado)
        
-        grados = 2
+        grados = 1
         regr_nublado = Pipeline([('poly', PolynomialFeatures(degree=grados)),
                           ('linear', LinearRegression())])
     
@@ -517,6 +517,12 @@ def matriz_distancias(punto):
     
     return pixels_dist
 
+##########################################################################################
+#######                                                                           ########
+#######                FUNCIONES INTERMEDIAS PARA EL USUARIO                      ########
+#######                                                                           ########
+##########################################################################################
+
 def mascara_nubes(img_bgr, centroide=None):
     '''
     Función que genera la máscara de nubes de una imágen utilizando el método propio propuesto.
@@ -578,6 +584,16 @@ def mascara_nubes(img_bgr, centroide=None):
         mask_cloud = cv2.bitwise_and(mask_cloud, mask_no_sol)
     
     return mask_cloud
+    
+def mascara_cielo_visible(mask_nubes, mask_cielo=cielo):
+    '''
+    Esta función devuelve la máscara de cielo visible a partir 
+    de una mácara de nubes.
+    
+    '''
+    
+    mask_cielo_visible = cv2.bitwise_not(mask_nubes, mask=mask_cielo)
+    return mask_cielo_visible
 
 def mascara_contorno_nubes(mask_nubes):
     '''
@@ -907,7 +923,7 @@ def intensidad_media(img_bgr, mask=None, modo='ITUR', coseno=False, gamma=False)
     
     return media
 
-def intensidad_acumulada(img_bgr, mask_parcial, mask_total, modo='ITUR', coseno=False, gamma=False):
+def intensidad_acumulada(img_bgr, mask_parcial, mask_total=cielo, modo='ITUR', coseno=False, gamma=False):
     '''
     Cálculo de la intensidad acumulada en una porción de la imágen respecto de
     una máscara que la encierra.
@@ -969,12 +985,6 @@ def porcion_mascaras(mask_parcial, mask_total):
     ratio_acumulado = area_parcial / area_total
     return ratio_acumulado
 
-##########################################################################################
-#######                                                                           ########
-#######                FUNCIONES INTERMEDIAS PARA EL USUARIO                      ########
-#######                                                                           ########
-##########################################################################################
-
 def muestra_imagen(img_cv2):
     '''
     Función encargada de la muestra en pantalla de una imágen.
@@ -983,7 +993,7 @@ def muestra_imagen(img_cv2):
     img_plt = cv2plt(img_cv2)
     plt.imshow(img_plt)
 
-def dibujo_puntos_cardinales(img=None):
+def dibujo_puntos_cardinales(img):
     '''
     Devuelve una copia de la imágen en la que se han dibujado los puntos cardinales.
     '''
@@ -1141,10 +1151,9 @@ def estimar_radiacion_sector(radiacion_total, mask_sector_parcial, mask_sector_t
         coseno_ = params[2]
         gamma_ = params[3]
         
-        intensidad_acumulada(img, mask_sector_parcial, mask_sector_total, modo=modo_, coseno=coseno_, gamma=gamma_)
+        ratio = intensidad_acumulada(img, mask_sector_parcial, mask_sector_total, modo=modo_, coseno=coseno_, gamma=gamma_)
         
     radiacion_estimada = ratio * radiacion_total
-    print('La radiación estimada en el sector indicado es de {.:2f}'.format(radiacion_estimada))
     
     return radiacion_estimada
 
@@ -1180,7 +1189,7 @@ def rad_difusa(radiacion, ratio_nubes, factor_solar, intens_media, cielo='despej
         rad = regr_difusa.predict([[radiacion, intens_media]])[0]
     else:
         intens_media *= ratio_nubes
-        rad = regr_difusa.predict([[radiacion, ratio_nubes, factor_solar, intens_media]])[0]
+        rad = regr_difusa.predict([[radiacion, ratio_nubes, intens_media]])[0]
     
     return rad
 
@@ -1272,7 +1281,7 @@ def muestra_cielo_visible(img_bgr=None):
     
     cv2.destroyAllWindows()  
     
-def muestra_nubes(img_bgr):
+def muestra_nubes(img_bgr=None):
     '''
     Muestra la imagen de la cámara en tiempo real,
     sobre ella se aplica la máscra de nubes obtenida.
@@ -1370,10 +1379,10 @@ def estimar_radiacion_difusa():
     
     if (ratio_nubes < 0.1) & (factor_solar > 0.75):
         tipo_cielo = 'despejado'
-        intens_media = intensidad_media(img_bgr, coseno=True)
+        intens_media = intensidad_media(img_bgr, coseno=True)/255
     else:
         tipo_cielo = 'nublado'
-        intens_media = intensidad_media(img_bgr, gamma=2.2)
+        intens_media = intensidad_media(img_bgr, gamma=2.2)/255
 
     try:
         import pygeonica as geo
@@ -1384,7 +1393,6 @@ def estimar_radiacion_difusa():
         rad = rad_gh_teorica(dt.now())
         tipo_rad = 'estimada'  
     finally:
-        print(rad, ratio_nubes, factor_solar, intens_media, tipo_cielo, tipo_rad)
         radiacion_difusa_estimada = rad_difusa(rad, ratio_nubes, factor_solar, intens_media, cielo=tipo_cielo, tipo_radiacion=tipo_rad)   
     
         return radiacion_difusa_estimada
