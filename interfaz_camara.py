@@ -147,7 +147,13 @@ def conecta_camara():
     try:
         return cam
     except:
-        cam = cv2.VideoCapture(direccion_camara)
+        ret = cv2.VideoCapture(direccion_camara)
+        if ret.isOpened():
+            cam = ret
+            return cam
+        else:
+            print('Error en la conexión con  la cámara.')
+            return -1
 
 def toma_imagen():
     '''
@@ -371,7 +377,7 @@ def f_rad_difusa_nublado_ghi():
                           ('linear', LinearRegression())])
     
         y_rad_nublado = pd_info_regresion_nublado['Radiacion difusa']
-        x_rad_nublado = pd_info_regresion_nublado[['ghi', 'Ratio nubes', 'Intensidad nubes ITUR Coseno:False Gamma_corr:True']]
+        x_rad_nublado = pd_info_regresion_nublado[['ghi', 'Ratio nubes', 'Intensidad nubes']]
     
         regr_nublado_ghi.fit(x_rad_nublado, y_rad_nublado)
         return regr_nublado_ghi
@@ -395,10 +401,10 @@ def f_rad_difusa_nublado():
                           ('linear', LinearRegression())])
     
         y_rad_nublado = pd_info_regresion_nublado['Radiacion difusa']
-        x_rad_nublado = pd_info_regresion_nublado[['Radiacion', 'Ratio nubes', 'Intensidad nubes ITUR Coseno:False Gamma_corr:True']]
+        x_rad_nublado = pd_info_regresion_nublado[['Radiacion', 'Ratio nubes', 'Intensidad nubes']]
     
         regr_nublado.fit(x_rad_nublado, y_rad_nublado)
-        return regr_nublado_ghi
+        return regr_nublado
         
 def f_rad_difusa_despejado():
     '''
@@ -414,15 +420,15 @@ def f_rad_difusa_despejado():
         # Lectura del dataframe con las variables:
         pd_info_regresion_despejado = pd.read_csv(ruta_datos_regresion_despejado)
         
-        grados = 2
+        grados = 1
         regr_despejado = Pipeline([('poly', PolynomialFeatures(degree=grados)),
                           ('linear', LinearRegression())])
                           
         y_rad_despejado = pd_info_regresion_despejado['Radiacion difusa']
-        x_rad_despejado = pd_info_regresion_despejado[['Radiacion', 'Intensidad cielo ITUR Coseno:True Gamma_corr:True']]
+        x_rad_despejado = pd_info_regresion_despejado[['Radiacion', 'Intensidad cielo']]
     
         regr_despejado.fit(x_rad_despejado, y_rad_despejado)
-        return regr_despejado    
+        return regr_despejado
 
 def rad_gh_teorica(hora):
     '''
@@ -776,7 +782,7 @@ def sol_cubierto(img_bgr, hora):
     zenith /= 90 
     
     # Circularidad alta
-    if (C > 0.7): 
+    if (C > 0.65): 
         # Área dentro de rango
         if (abs(A - f_area_zenith()(zenith))) < (0.2 * A): # Sol totalmente descubierto
             factor_sol_cubierto = 1
@@ -1157,7 +1163,7 @@ def estimar_radiacion_sector(radiacion_total, mask_sector_parcial, mask_sector_t
     
     return radiacion_estimada
 
-def rad_difusa(radiacion, ratio_nubes, factor_solar, intens_media, cielo='despejado', tipo_radiacion='estimada'):
+def rad_difusa(radiacion, ratio_nubes, factor_solar, intens_media, cielo='despejado', tipo_radiacion='teorica'):
     '''
     Devuelve la radiación difusa estimada, obtenida con los parámetros indicados.
 
@@ -1174,7 +1180,7 @@ def rad_difusa(radiacion, ratio_nubes, factor_solar, intens_media, cielo='despej
     cielo : string. Despejado o nublado.
         Indica el tipo de cielo para el que se quiere obtener la radiación.
     tipo_radiacion: string. Estimada o real.
-        Indica si el valor de la variable "radaicion" corresponde con la ghi medida por los piranómetros o 
+        Indica si el valor de la variable "radiacion" corresponde con la ghi medida por los piranómetros o 
         con la ghi estimada por la librería PVLib.
         * Se puede observar que en el caso de cielos despejados esta variable afecta al modelo utilizado.   
     '''
@@ -1185,10 +1191,10 @@ def rad_difusa(radiacion, ratio_nubes, factor_solar, intens_media, cielo='despej
     regr_difusa = f_rad_difusa[cielo][tipo_radiacion]()
     
     if cielo == 'despejado':
-        intens_media *= (1 - ratio_nubes)
+        # intens_media *= (1 - ratio_nubes)
         rad = regr_difusa.predict([[radiacion, intens_media]])[0]
     else:
-        intens_media *= ratio_nubes
+        # intens_media *= ratio_nubes
         rad = regr_difusa.predict([[radiacion, ratio_nubes, intens_media]])[0]
     
     return rad
@@ -1370,8 +1376,6 @@ def estimar_radiacion_difusa():
         centroide_img = res_factor_solar[1]
         area_circumsolar = res_factor_solar[2]
         circulridad_circumsolar = res_factor_solar[3]
-        
-    print(ratio_nubes, factor_solar)
     
     if factor_solar >= 0.85:
         mask_nubes = mascara_nubes(img_bgr, centroide_img)
@@ -1379,7 +1383,7 @@ def estimar_radiacion_difusa():
     
     if (ratio_nubes < 0.1) & (factor_solar > 0.75):
         tipo_cielo = 'despejado'
-        intens_media = intensidad_media(img_bgr, coseno=True)/255
+        intens_media = intensidad_media(img_bgr, coseno=True, gamma=2.2)/255
     else:
         tipo_cielo = 'nublado'
         intens_media = intensidad_media(img_bgr, gamma=2.2)/255
@@ -1391,8 +1395,9 @@ def estimar_radiacion_difusa():
         tipo_rad = 'real'
     except:
         rad = rad_gh_teorica(dt.now())
-        tipo_rad = 'estimada'  
+        tipo_rad = 'teorica'  
     finally:
+        print(rad, ratio_nubes, factor_solar, intens_media, tipo_cielo)
         radiacion_difusa_estimada = rad_difusa(rad, ratio_nubes, factor_solar, intens_media, cielo=tipo_cielo, tipo_radiacion=tipo_rad)   
     
         return radiacion_difusa_estimada
